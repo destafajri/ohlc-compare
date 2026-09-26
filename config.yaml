@@ -1,0 +1,45 @@
+oanda:
+  # Practice/demo API. For a live account use: https://api-fxtrade.oanda.com
+  base_url: https://api-fxpractice.oanda.com
+  token_env_var: OANDA_API_TOKEN
+  timeout_seconds: 30
+
+market:
+  # OANDA granularity examples: M1, M5, M15, H1, H4, D
+  granularity: M5
+  # OANDA candles endpoint allows up to 5000 candles per request.
+  count: 500
+  # M = midpoint, B = bid, A = ask
+  price: M
+  # Ignore the currently-forming candle so comparisons only use finished data.
+  complete_only: true
+
+instruments:
+  - name: XAU_USD
+    group: TARGET
+  - name: EUR_USD
+    group: USD_COUNTER
+  - name: USD_JPY
+    group: USD_COUNTER
+  - name: GBP_USD
+    group: USD_COUNTER
+  - name: USD_CHF
+    group: USD_COUNTER
+  - name: USB02Y_USD
+    group: RATES
+  - name: USB10Y_USD
+    group: RATES
+  - name: XAG_USD
+    group: PRECIOUS_METAL
+
+plot:
+  normalize_base: 100
+  title: OANDA Cross-Market Comparison
+  figsize: [15, 8]
+  dpi: 180
+  show: true
+
+output:
+  directory: output
+  save_csv: true
+  save_png: true
