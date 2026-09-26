@@ -1,8 +1,12 @@
 # OHLC Compare
 
-Simple Python tool to fetch OHLC candles from the OANDA REST API, synchronize multiple instruments by timestamp, normalize their close prices to a common base, and plot them on one chart.
+Simple Python tool to compare multiple OANDA instruments on one normalized chart.
 
-The default config compares:
+The program does **not** connect to OANDA directly and does **not** need an OANDA token on your local machine. Market data is fetched through:
+
+`https://api-get-ohlc-oanda.vercel.app/ohlc`
+
+The default configuration compares:
 
 - **Target:** `XAU_USD`
 - **USD / counter:** `EUR_USD`, `USD_JPY`, `GBP_USD`, `USD_CHF`
@@ -11,24 +15,37 @@ The default config compares:
 
 The default example fetches **500 M5 candles per instrument**.
 
-## What the program does
+## How it works
 
-1. Reads parameters from `config.yaml`.
-2. Reads the OANDA API token from `.env`.
-3. Downloads candles for every configured instrument.
-4. Optionally removes incomplete/current candles.
-5. Keeps only timestamps available in **all** instruments (exact intersection).
-6. Normalizes each close-price series so its first common candle equals `100`.
-7. Displays a comparison chart.
-8. Saves aligned closes, normalized data, and the chart to `output/`.
+```text
+ohlc-compare (local Python)
+        |
+        | HTTPS GET /ohlc
+        v
+api-get-ohlc-oanda.vercel.app
+        |
+        | OANDA credentials stay server-side
+        v
+      OANDA
+```
 
-Because OANDA instruments can have different trading/session availability, the number of common candles can be lower than the requested candle count. This is expected.
+For each configured instrument the program:
+
+1. Calls the public `/ohlc` API.
+2. Optionally removes the incomplete/current candle.
+3. Keeps only timestamps present in **every** instrument.
+4. Normalizes each close-price series so the first common candle equals `100`.
+5. Displays a comparison chart.
+6. Saves aligned closes, normalized data, and the PNG chart to `output/`.
+
+Different instruments can have different trading/session availability, so the common aligned candle count can be lower than the requested count. This is expected.
 
 ## Requirements
 
 - Python 3.11+ recommended
-- OANDA practice or live account
-- OANDA personal access token
+- Internet access to `api-get-ohlc-oanda.vercel.app`
+
+No local OANDA account ID, API token, `.env`, or other secret is required.
 
 ## Local setup
 
@@ -62,61 +79,66 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Create your local secret file:
-
-### macOS / Linux
-
-```bash
-cp .env.example .env
-```
-
-### Windows PowerShell
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Edit `.env` and replace the placeholder with your actual OANDA token:
-
-```dotenv
-OANDA_API_TOKEN=your-real-token-here
-```
-
-`.env` is already excluded by `.gitignore` and should never be committed.
-
 ## Run
 
 ```bash
 python ohlc_compare.py
 ```
 
-Or use another config file:
+Or explicitly choose a config file:
 
 ```bash
 python ohlc_compare.py --config config.yaml
 ```
 
-The program prints the number of common candles, time range, and normalized end change for each instrument.
+The program prints the number of common candles, aligned time range, and end change from the normalized base for every instrument.
 
 ## Configuration
 
-All non-secret runtime parameters live in `config.yaml`.
+All runtime parameters are in `config.yaml`.
 
-### Change timeframe and candle count
+### API endpoint
+
+```yaml
+api:
+  base_url: https://api-get-ohlc-oanda.vercel.app
+  timeout_seconds: 30
+```
+
+Normally you do not need to change this. If you deploy your own compatible instance, replace `base_url` with that deployment URL.
+
+### Timeframe and candle count
 
 ```yaml
 market:
-  granularity: M15
-  count: 1000
-  price: M
+  granularity: M5
+  count: 500
   complete_only: true
 ```
 
-Common OANDA granularities include `M1`, `M5`, `M15`, `H1`, `H4`, and `D`.
+Examples:
 
-The OANDA candles endpoint supports a maximum of **5000 candles per request**. This program intentionally validates that limit.
+```yaml
+# 1,000 M15 candles
+market:
+  granularity: M15
+  count: 1000
+  complete_only: true
+```
 
-### Change instruments
+```yaml
+# 5,000 M5 candles
+market:
+  granularity: M5
+  count: 5000
+  complete_only: true
+```
+
+The `/ohlc` endpoint accepts a maximum of **5000 candles per request**. The program validates the same limit locally.
+
+Common granularities include `M1`, `M5`, `M15`, `H1`, `H4`, and `D`.
+
+### Instruments
 
 ```yaml
 instruments:
@@ -126,50 +148,56 @@ instruments:
     group: USD_COUNTER
   - name: USD_JPY
     group: USD_COUNTER
+  - name: GBP_USD
+    group: USD_COUNTER
+  - name: USD_CHF
+    group: USD_COUNTER
+  - name: USB02Y_USD
+    group: RATES
   - name: USB10Y_USD
     group: RATES
   - name: XAG_USD
     group: PRECIOUS_METAL
 ```
 
-`group` is documentation metadata for humans; the current plot includes every configured instrument.
+`group` is currently metadata for readability. Every listed instrument is plotted.
 
-### Change normalization
+### Normalization
 
 ```yaml
 plot:
   normalize_base: 100
 ```
 
-Normalization is:
+The calculation is:
 
 ```text
 normalized[t] = close[t] / first_common_close * normalize_base
 ```
 
-This makes instruments with very different nominal prices directly comparable by relative movement. It does **not** mean their volatility or economic exposure is equivalent.
+This lets instruments with very different nominal prices share one chart. It does not imply equal volatility or equivalent economic exposure.
 
-### Practice vs live OANDA
+### Chart display
 
-Practice/demo:
-
-```yaml
-oanda:
-  base_url: https://api-fxpractice.oanda.com
-```
-
-Live:
+For desktop use:
 
 ```yaml
-oanda:
-  base_url: https://api-fxtrade.oanda.com
+plot:
+  show: true
 ```
 
-Use a token that belongs to the matching OANDA environment.
+For a server, cron job, or other headless environment:
+
+```yaml
+plot:
+  show: false
+```
+
+PNG/CSV output can still be generated when `show: false`.
 
 ## Output
 
-By default the program creates:
+Default output:
 
 ```text
 output/
@@ -178,7 +206,7 @@ output/
 └── ohlc_compare_M5_500_normalized.csv
 ```
 
-You can control this in `config.yaml`:
+Configure it with:
 
 ```yaml
 output:
@@ -187,33 +215,55 @@ output:
   save_png: true
 ```
 
-To run without opening the chart window, useful on a server or scheduler:
+### Aligned close CSV
 
-```yaml
-plot:
-  show: false
+Contains the original close price for every instrument after exact timestamp intersection.
+
+### Normalized CSV
+
+Contains the same aligned observations normalized to the configured base, default `100`.
+
+## Example API request
+
+The Python program effectively makes requests such as:
+
+```text
+https://api-get-ohlc-oanda.vercel.app/ohlc?instrument=XAU_USD&granularity=M5&count=500
 ```
 
-The PNG and CSV files can still be saved.
+The comparison program currently uses the `close` field from each returned candle.
 
 ## Tests
 
-The tests cover the core local transformation logic without calling OANDA:
+Run:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-They verify timestamp intersection, normalization behavior, zero-base protection, and OANDA candle-count validation.
+Tests cover:
+
+- the HTTP contract used for `/ohlc`
+- no OANDA authorization header/token required locally
+- incomplete candle filtering
+- exact timestamp intersection
+- normalization
+- zero-base protection
+- maximum candle-count validation
 
 ## Notes
 
-- The program uses **close prices** for the comparison chart.
-- Default `price: M` uses OANDA midpoint candles.
-- With `complete_only: true`, the unfinished current candle is excluded.
-- Alignment uses an exact timestamp intersection across all configured instruments to avoid comparing mismatched bars.
-- `USB02Y_USD` and `USB10Y_USD` are OANDA rate/bond-price instruments; they should not be interpreted as direct Treasury yields.
-- Price-level overlays are useful visually. For quantitative trading research, return correlation, rolling correlation, and lead/lag tests are generally more appropriate than correlation of raw price levels.
+- The upstream API currently serves OANDA midpoint candles.
+- `complete_only: true` is recommended for reproducible analysis.
+- `USB02Y_USD` and `USB10Y_USD` are OANDA bond/rate price instruments, not direct Treasury yield series.
+- Price-level overlays are useful for visual comparison. For quantitative research, prefer returns, rolling correlation, and lead/lag analysis over correlation of raw price levels.
+- Availability of the comparison tool now depends on the configured HTTP API being reachable. If that API is unavailable, the local program cannot fetch fresh candles.
+
+## Related project
+
+OANDA API service:
+
+https://github.com/destafajri/api-get-ohlc-oanda
 
 ## License
 

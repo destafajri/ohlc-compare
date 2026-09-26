@@ -2,7 +2,84 @@ import unittest
 
 import pandas as pd
 
-from ohlc_compare import align_close_series, normalize_frame, validate_config
+from ohlc_compare import align_close_series, fetch_candles, normalize_frame, validate_config
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class FakeSession:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return FakeResponse(self.payload)
+
+
+class FetchCandlesTests(unittest.TestCase):
+    def test_calls_public_ohlc_api_without_oanda_credentials(self):
+        session = FakeSession(
+            {
+                "candles": [
+                    {
+                        "time": "2026-09-25T20:50:00Z",
+                        "close": "4285.125",
+                        "complete": True,
+                    }
+                ]
+            }
+        )
+
+        result = fetch_candles(
+            session,
+            base_url="https://api-get-ohlc-oanda.vercel.app/",
+            instrument="XAU_USD",
+            granularity="M5",
+            count=500,
+            complete_only=True,
+            timeout_seconds=30,
+        )
+
+        self.assertEqual(result["close"].tolist(), [4285.125])
+        url, kwargs = session.calls[0]
+        self.assertEqual(url, "https://api-get-ohlc-oanda.vercel.app/ohlc")
+        self.assertEqual(
+            kwargs["params"],
+            {"instrument": "XAU_USD", "granularity": "M5", "count": 500},
+        )
+        self.assertNotIn("headers", kwargs)
+
+    def test_filters_incomplete_api_candles_when_enabled(self):
+        session = FakeSession(
+            {
+                "candles": [
+                    {"time": "2026-09-25T20:45:00Z", "close": "10", "complete": True},
+                    {"time": "2026-09-25T20:50:00Z", "close": "11", "complete": False},
+                ]
+            }
+        )
+
+        result = fetch_candles(
+            session,
+            base_url="https://example.test",
+            instrument="XAU_USD",
+            granularity="M5",
+            count=2,
+            complete_only=True,
+            timeout_seconds=30,
+        )
+
+        self.assertEqual(result["close"].tolist(), [10.0])
 
 
 class AlignCloseSeriesTests(unittest.TestCase):
@@ -40,10 +117,21 @@ class NormalizeFrameTests(unittest.TestCase):
 
 
 class ValidateConfigTests(unittest.TestCase):
-    def test_rejects_oanda_count_above_api_limit(self):
+    def test_accepts_public_api_config(self):
         config = {
-            "oanda": {"base_url": "https://api-fxpractice.oanda.com", "token_env_var": "OANDA_API_TOKEN"},
-            "market": {"granularity": "M5", "count": 5001, "price": "M", "complete_only": True},
+            "api": {"base_url": "https://api-get-ohlc-oanda.vercel.app", "timeout_seconds": 30},
+            "market": {"granularity": "M5", "count": 500, "complete_only": True},
+            "instruments": [{"name": "XAU_USD", "group": "TARGET"}],
+            "plot": {"normalize_base": 100.0, "show": True},
+            "output": {"directory": "output", "save_csv": True, "save_png": True},
+        }
+
+        validate_config(config)
+
+    def test_rejects_count_above_api_limit(self):
+        config = {
+            "api": {"base_url": "https://api-get-ohlc-oanda.vercel.app", "timeout_seconds": 30},
+            "market": {"granularity": "M5", "count": 5001, "complete_only": True},
             "instruments": [{"name": "XAU_USD", "group": "TARGET"}],
             "plot": {"normalize_base": 100.0, "show": True},
             "output": {"directory": "output", "save_csv": True, "save_png": True},

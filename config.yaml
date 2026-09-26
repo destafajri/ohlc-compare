@@ -1,16 +1,12 @@
-oanda:
-  # Practice/demo API. For a live account use: https://api-fxtrade.oanda.com
-  base_url: https://api-fxpractice.oanda.com
-  token_env_var: OANDA_API_TOKEN
+api:
+  base_url: https://api-get-ohlc-oanda.vercel.app
   timeout_seconds: 30
 
 market:
-  # OANDA granularity examples: M1, M5, M15, H1, H4, D
+  # OANDA granularity examples exposed by the API: M1, M5, M15, H1, H4, D
   granularity: M5
-  # OANDA candles endpoint allows up to 5000 candles per request.
+  # The public /ohlc endpoint supports 1-5000 candles per request.
   count: 500
-  # M = midpoint, B = bid, A = ask
-  price: M
   # Ignore the currently-forming candle so comparisons only use finished data.
   complete_only: true
 
