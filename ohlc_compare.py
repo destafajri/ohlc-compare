@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 from typing import Any
 
@@ -9,10 +8,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import requests
 import yaml
-from dotenv import load_dotenv
 
 
-OANDA_MAX_COUNT = 5000
+API_MAX_COUNT = 5000
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -26,15 +24,19 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
 
 def validate_config(config: dict[str, Any]) -> None:
-    required_sections = ["oanda", "market", "instruments", "plot", "output"]
+    required_sections = ["api", "market", "instruments", "plot", "output"]
     missing = [section for section in required_sections if section not in config]
     if missing:
         raise ValueError(f"Missing config section(s): {', '.join(missing)}")
 
+    api = config["api"]
+    if not isinstance(api, dict) or not str(api.get("base_url", "")).strip():
+        raise ValueError("api.base_url is required.")
+
     market = config["market"]
     count = int(market.get("count", 0))
-    if not 1 <= count <= OANDA_MAX_COUNT:
-        raise ValueError(f"market.count must be between 1 and {OANDA_MAX_COUNT}.")
+    if not 1 <= count <= API_MAX_COUNT:
+        raise ValueError(f"market.count must be between 1 and {API_MAX_COUNT}.")
 
     instruments = config["instruments"]
     if not isinstance(instruments, list) or not instruments:
@@ -57,19 +59,20 @@ def fetch_candles(
     session: requests.Session,
     *,
     base_url: str,
-    token: str,
     instrument: str,
     granularity: str,
     count: int,
-    price: str,
     complete_only: bool,
     timeout_seconds: float,
 ) -> pd.DataFrame:
-    url = f"{base_url.rstrip('/')}/v3/instruments/{instrument}/candles"
+    url = f"{base_url.rstrip('/')}/ohlc"
     response = session.get(
         url,
-        headers={"Authorization": f"Bearer {token}"},
-        params={"granularity": granularity, "count": count, "price": price},
+        params={
+            "instrument": instrument,
+            "granularity": granularity,
+            "count": count,
+        },
         timeout=timeout_seconds,
     )
     response.raise_for_status()
@@ -80,15 +83,9 @@ def fetch_candles(
     for candle in candles:
         if complete_only and not candle.get("complete", False):
             continue
-
-        price_key = {"M": "mid", "B": "bid", "A": "ask"}.get(price.upper())
-        if price_key is None:
-            raise ValueError("market.price must be one of M, B, or A.")
-        component = candle.get(price_key)
-        if not component or "c" not in component:
+        if "time" not in candle or "close" not in candle:
             continue
-
-        rows.append({"time": candle["time"], "close": float(component["c"])})
+        rows.append({"time": candle["time"], "close": float(candle["close"])})
 
     if not rows:
         raise RuntimeError(f"No usable candles returned for {instrument}.")
@@ -173,16 +170,8 @@ def plot_normalized(
 
 def run(config_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     config = load_config(config_path)
-    load_dotenv()
 
-    oanda = config["oanda"]
-    token_env_var = str(oanda.get("token_env_var", "OANDA_API_TOKEN"))
-    token = os.getenv(token_env_var)
-    if not token:
-        raise RuntimeError(
-            f"Missing OANDA API token. Set {token_env_var} in your environment or .env file."
-        )
-
+    api = config["api"]
     market = config["market"]
     output = config["output"]
     plot = config["plot"]
@@ -195,14 +184,12 @@ def run(config_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
             print(f"Fetching {instrument} ...")
             frames[instrument] = fetch_candles(
                 session,
-                base_url=str(oanda["base_url"]),
-                token=token,
+                base_url=str(api["base_url"]),
                 instrument=instrument,
                 granularity=str(market["granularity"]),
                 count=int(market["count"]),
-                price=str(market.get("price", "M")),
                 complete_only=bool(market.get("complete_only", True)),
-                timeout_seconds=float(oanda.get("timeout_seconds", 30)),
+                timeout_seconds=float(api.get("timeout_seconds", 30)),
             )
             print(f"  received {len(frames[instrument])} usable candles")
 
@@ -251,7 +238,7 @@ def run(config_path: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fetch OANDA candles, align timestamps, normalize prices, and plot cross-market movement."
+        description="Fetch candles from the configured OHLC API, align timestamps, normalize prices, and plot cross-market movement."
     )
     parser.add_argument(
         "--config",
